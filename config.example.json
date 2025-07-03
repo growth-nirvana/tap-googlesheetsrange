@@ -1,0 +1,5 @@
+{
+  "spreadsheet_url": "https://docs.google.com/spreadsheets/d/your-sheet-id/edit#gid=0",
+  "named_range": "MyNamedRange",
+  "credentials": "/path/to/service_account.json"
+} 
