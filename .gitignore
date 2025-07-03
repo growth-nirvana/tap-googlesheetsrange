@@ -136,3 +136,5 @@ dmypy.json
 .pyre/
 
 service-account.json
+config.json
+output.jsonl
