@@ -46,11 +46,16 @@ class GoogleSheetsStream(Stream):
             return self._worksheet, self._header
         gc = self.authenticator.get_client()
         spreadsheet = gc.open_by_url(self.config["spreadsheet_url"])
-        # gspread fetches the range as a list of lists
         values = spreadsheet.values_get(self.config["named_range"]).get("values", [])
         if not values:
             raise RuntimeError("No data found in the named range.")
-        header = values[0]
+        raw_header = values[0]
+        header = []
+        for idx, col in enumerate(raw_header):
+            if col.strip() == "":
+                header.append(f"column_{idx+1}")
+            else:
+                header.append(col)
         self._worksheet = values
         self._header = header
         return values, header
