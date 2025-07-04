@@ -97,3 +97,24 @@ def test_multiple_sheets(monkeypatch_auth):
     _, header2 = streams[1].get_worksheet_and_header()
     assert header1 == ["A", "B"]
     assert header2 == ["X", "Y"]
+
+def test_duplicate_stream_names_raise_error(monkeypatch_auth):
+    config = {
+        "sheets": [
+            {
+                "spreadsheet_url": "https://docs.google.com/spreadsheets/d/1",
+                "named_range": "Range1",
+                "stream_name": "duplicate"
+            },
+            {
+                "spreadsheet_url": "https://docs.google.com/spreadsheets/d/2",
+                "named_range": "Range2",
+                "stream_name": "duplicate"
+            }
+        ],
+        "credentials": "/dev/null",  # Use /dev/null for consistency with other tests
+        "normalize_columns": True
+    }
+    with pytest.raises(ValueError) as excinfo:
+        tap = TapGoogleSheetsNamedRange(config=config)
+    assert "duplicate" in str(excinfo.value).lower() and "stream name" in str(excinfo.value).lower()
