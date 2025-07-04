@@ -1,5 +1,15 @@
 {
-  "spreadsheet_url": "https://docs.google.com/spreadsheets/d/your-sheet-id/edit#gid=0",
-  "named_range": "MyNamedRange",
-  "credentials": "/path/to/service_account.json"
+  "sheets": [
+    {
+      "spreadsheet_url": "https://docs.google.com/spreadsheets/d/your-sheet-id/edit#gid=0",
+      "named_range": "MyNamedRange",
+      "stream_name": "optional_stream_name"
+    },
+    {
+      "spreadsheet_url": "https://docs.google.com/spreadsheets/d/another-sheet-id/edit#gid=0",
+      "named_range": "AnotherRange"
+    }
+  ],
+  "credentials": "/path/to/service_account.json",
+  "bigquery_column_normalization": true
 } 

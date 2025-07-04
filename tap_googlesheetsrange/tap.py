@@ -14,16 +14,16 @@ class TapGoogleSheetsNamedRange(Tap):
 
     config_jsonschema = th.PropertiesList(
         th.Property(
-            "spreadsheet_url",
-            th.StringType,
+            "sheets",
+            th.ArrayType(
+                th.ObjectType(
+                    th.Property("spreadsheet_url", th.StringType, required=True),
+                    th.Property("named_range", th.StringType, required=True),
+                    th.Property("stream_name", th.StringType, required=False),
+                )
+            ),
             required=True,
-            description="The public or private URL of the Google Sheet to extract data from.",
-        ),
-        th.Property(
-            "named_range",
-            th.StringType,
-            required=True,
-            description="The named range in the Google Sheet to extract data from.",
+            description="List of sheets and named ranges to extract data from.",
         ),
         th.Property(
             "credentials",
@@ -42,10 +42,17 @@ class TapGoogleSheetsNamedRange(Tap):
     ).to_dict()
 
     def discover_streams(self):
-        """Return a list of discovered streams."""
-        return [
-            GoogleSheetsStream(self, name="named_range_stream"),
-        ]
+        streams = []
+        for sheet_cfg in self.config["sheets"]:
+            stream_name = sheet_cfg.get("stream_name") or f"{sheet_cfg['named_range']}"
+            streams.append(
+                GoogleSheetsStream(
+                    self,
+                    name=stream_name,
+                    sheet_config=sheet_cfg
+                )
+            )
+        return streams
 
 if __name__ == "__main__":
     TapGoogleSheetsNamedRange.cli()

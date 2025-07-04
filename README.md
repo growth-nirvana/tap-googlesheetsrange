@@ -28,22 +28,39 @@ pipx install git+https://github.com/ORG_NAME/tap-googlesheetsrange.git@main
 
 ### Accepted Config Options
 
-<!--
-Developer TODO: Provide a list of config options accepted by the tap.
+| Field                         | Type    | Required | Description                                                                 |
+|-------------------------------|---------|----------|-----------------------------------------------------------------------------|
+| sheets                        | array   | Yes      | List of sheet configs. Each config must include `spreadsheet_url` and `named_range`, and may include `stream_name`. |
+| credentials                   | string  | Yes      | Google service account credentials as a JSON string or a file path.         |
+| bigquery_column_normalization | boolean | No       | If true, normalize column names to be BigQuery-compliant. Default: true.    |
 
-This section can be created by copy-pasting the CLI output from:
+Each entry in the `sheets` array should be an object with the following fields:
+- `spreadsheet_url` (string, required): The URL of the Google Sheet.
+- `named_range` (string, required): The named range to extract.
+- `stream_name` (string, optional): The name to use for the stream (defaults to the named range).
 
+#### Example `config.json`
+
+```json
+{
+  "sheets": [
+    {
+      "spreadsheet_url": "https://docs.google.com/spreadsheets/d/your-sheet-id/edit#gid=0",
+      "named_range": "MyNamedRange",
+      "stream_name": "optional_stream_name"
+    },
+    {
+      "spreadsheet_url": "https://docs.google.com/spreadsheets/d/another-sheet-id/edit#gid=0",
+      "named_range": "AnotherRange"
+    }
+  ],
+  "credentials": "/path/to/service_account.json",
+  "bigquery_column_normalization": true
+}
 ```
-tap-googlesheetsrange --about --format=markdown
-```
--->
 
-A full list of supported settings and capabilities for this
-tap is available by running:
-
-```bash
-tap-googlesheetsrange --about
-```
+- The `credentials` field can be either a path to a service account JSON file or the JSON string itself.
+- The Google Sheet(s) must be shared with the service account email (found in the credentials file under `client_email`).
 
 ### Configure using environment variables
 
@@ -135,11 +152,9 @@ meltano run tap-googlesheetsrange target-jsonl
 See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the SDK to
 develop your own taps and targets.
 
-| bigquery_column_normalization | boolean | No | If true, normalize column names to be BigQuery-compliant. Default: false. |
-
 ### Column Normalization
 
-If `bigquery_column_normalization` is set to `true`, all column names will be normalized to be BigQuery-compliant. This includes:
+If `bigquery_column_normalization` is set to `true` (the default), all column names will be normalized to be BigQuery-compliant. This includes:
 - Lowercasing
 - Replacing spaces and special characters with underscores
 - Ensuring the name starts with a letter or underscore

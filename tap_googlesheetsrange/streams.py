@@ -32,7 +32,8 @@ class GoogleSheetsStream(Stream):
     RESERVED_KEYWORDS = {"where", "view"}
     FORBIDDEN_PREFIXES = ["_TABLE_", "_FILE_", "_PARTITION", "_ROW_TIMESTAMP", "__ROOT__", "_COLIDENTIFIER"]
 
-    def __init__(self, tap, name=None):
+    def __init__(self, tap, name=None, sheet_config=None):
+        self.sheet_config = sheet_config or {}
         self._authenticator = None
         self._worksheet = None
         self._header = None
@@ -49,8 +50,8 @@ class GoogleSheetsStream(Stream):
         if self._worksheet is not None and self._header is not None:
             return self._worksheet, self._header
         gc = self.authenticator.get_client()
-        spreadsheet = gc.open_by_url(self.config["spreadsheet_url"])
-        values = spreadsheet.values_get(self.config["named_range"]).get("values", [])
+        spreadsheet = gc.open_by_url(self.sheet_config["spreadsheet_url"])
+        values = spreadsheet.values_get(self.sheet_config["named_range"]).get("values", [])
         if not values:
             raise RuntimeError("No data found in the named range.")
         raw_header = values[0]
