@@ -36,7 +36,7 @@ class TapGoogleSheetsNamedRange(Tap):
             "bigquery_column_normalization",
             th.BooleanType,
             required=False,
-            default=False,
+            default=True,
             description="If true, normalize column names to be BigQuery-compliant.",
         ),
     ).to_dict()
