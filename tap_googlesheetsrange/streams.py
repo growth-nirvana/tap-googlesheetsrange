@@ -8,6 +8,7 @@ import os
 import gspread
 from singer_sdk import Stream
 from singer_sdk import typing as th
+from tap_googlesheetsrange.bq_column_normalizer import normalize_bq_column_names
 
 class GoogleSheetsAuthenticator:
     """Custom authenticator for Google Sheets using a service account."""
@@ -27,6 +28,9 @@ class GoogleSheetsStream(Stream):
     name = "named_range_stream"
     primary_keys = []
     replication_key = None
+
+    RESERVED_KEYWORDS = {"where", "view"}
+    FORBIDDEN_PREFIXES = ["_TABLE_", "_FILE_", "_PARTITION", "_ROW_TIMESTAMP", "__ROOT__", "_COLIDENTIFIER"]
 
     def __init__(self, tap, name=None):
         self._authenticator = None
@@ -50,12 +54,19 @@ class GoogleSheetsStream(Stream):
         if not values:
             raise RuntimeError("No data found in the named range.")
         raw_header = values[0]
-        header = []
-        for idx, col in enumerate(raw_header):
-            if col.strip() == "":
-                header.append(f"column_{idx+1}")
-            else:
-                header.append(col)
+        if self.config.get("bigquery_column_normalization", False):
+            header = normalize_bq_column_names(
+                raw_header,
+                reserved_keywords=self.RESERVED_KEYWORDS,
+                forbidden_prefixes=self.FORBIDDEN_PREFIXES,
+            )
+        else:
+            header = []
+            for idx, col in enumerate(raw_header):
+                if col.strip() == "":
+                    header.append(f"column_{idx+1}")
+                else:
+                    header.append(col)
         self._worksheet = values
         self._header = header
         return values, header

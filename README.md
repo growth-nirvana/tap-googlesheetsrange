@@ -134,3 +134,18 @@ meltano run tap-googlesheetsrange target-jsonl
 
 See the [dev guide](https://sdk.meltano.com/en/latest/dev_guide.html) for more instructions on how to use the SDK to
 develop your own taps and targets.
+
+| bigquery_column_normalization | boolean | No | If true, normalize column names to be BigQuery-compliant. Default: false. |
+
+### Column Normalization
+
+If `bigquery_column_normalization` is set to `true`, all column names will be normalized to be BigQuery-compliant. This includes:
+- Lowercasing
+- Replacing spaces and special characters with underscores
+- Ensuring the name starts with a letter or underscore
+- Truncating to 300 characters
+- Avoiding forbidden prefixes (e.g., `_TABLE_`, `_FILE_`, etc.) by prepending an extra underscore
+- Avoiding reserved keywords (e.g., `WHERE`, `VIEW`) by appending `_col`
+- Ensuring uniqueness
+
+This is useful if you plan to load the tap output directly into BigQuery.

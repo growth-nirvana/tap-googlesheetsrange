@@ -32,6 +32,13 @@ class TapGoogleSheetsNamedRange(Tap):
             secret=True,
             description="Google service account credentials as a JSON string or a file path.",
         ),
+        th.Property(
+            "bigquery_column_normalization",
+            th.BooleanType,
+            required=False,
+            default=False,
+            description="If true, normalize column names to be BigQuery-compliant.",
+        ),
     ).to_dict()
 
     def discover_streams(self):
