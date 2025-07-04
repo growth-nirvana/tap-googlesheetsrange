@@ -30,14 +30,17 @@ pipx install git+https://github.com/ORG_NAME/tap-googlesheetsrange.git@main
 
 | Field                         | Type    | Required | Description                                                                 |
 |-------------------------------|---------|----------|-----------------------------------------------------------------------------|
-| sheets                        | array   | Yes      | List of sheet configs. Each config must include `spreadsheet_url` and `named_range`, and may include `stream_name`. |
+| sheets                        | array   | Yes      | List of sheet configs. Each config must include `spreadsheet_url` and `named_range`, and may include `stream_name`. **All stream names must be unique.** |
 | credentials                   | string  | Yes      | Google service account credentials as a JSON string or a file path.         |
 | bigquery_column_normalization | boolean | No       | If true, normalize column names to be BigQuery-compliant. Default: true.    |
 
 Each entry in the `sheets` array should be an object with the following fields:
 - `spreadsheet_url` (string, required): The URL of the Google Sheet.
 - `named_range` (string, required): The named range to extract.
-- `stream_name` (string, optional): The name to use for the stream (defaults to the named range).
+- `stream_name` (string, optional): The name to use for the stream (defaults to the named range). **Must be unique across all sheets.**
+
+> **Note:**
+> All `stream_name` values must be unique across your config. If two or more sheets use the same stream name, the tap will fail to start and provide a detailed error message showing the conflicting entries. This helps prevent data from being overwritten or misrouted.
 
 #### Example `config.json`
 
@@ -61,6 +64,20 @@ Each entry in the `sheets` array should be an object with the following fields:
 
 - The `credentials` field can be either a path to a service account JSON file or the JSON string itself.
 - The Google Sheet(s) must be shared with the service account email (found in the credentials file under `client_email`).
+
+### Stream Name Validation and Error Example
+
+If you provide duplicate stream names, the tap will fail to start and show an error like:
+
+```
+Duplicate stream names found: duplicate.
+Conflicting entries:
+  - spreadsheet_url: https://docs.google.com/spreadsheets/d/1, named_range: Range1, stream_name: duplicate
+  - spreadsheet_url: https://docs.google.com/spreadsheets/d/2, named_range: Range2, stream_name: duplicate
+Stream names must be unique across all sheets in the config.
+```
+
+To fix this, ensure each `stream_name` (or `named_range` if `stream_name` is omitted) is unique in your config.
 
 ### Configure using environment variables
 
