@@ -41,6 +41,8 @@ class DummyAuthenticator:
             def values_get(self, named_range):
                 if named_range == "dummy_range":
                     return {"values": [["A", "B", "", "D"], ["1", "2", "", "4"]]}
+                if named_range == "RangeMulti":
+                    return {"values": [["A", "B"], ["1", "2"], ["3", "4"]]}
                 if named_range == "Range1":
                     return {"values": [["A", "B"], ["1", "2"]]}
                 elif named_range == "Range2":
@@ -70,7 +72,28 @@ def test_empty_column_header(monkeypatch_auth):
     _, header = stream.get_worksheet_and_header()
     assert header == ["a", "b", "column", "d"]
     records = list(stream.get_records(None))
-    assert records == [{"a": "1", "b": "2", "column": "", "d": "4"}]
+    assert records == [{"a": "1", "b": "2", "column": "", "d": "4", "_row_number": 1}]
+    assert "_row_number" in stream.schema["properties"]
+    assert "integer" in str(stream.schema["properties"]["_row_number"]).lower()
+
+
+def test_row_number_increments(monkeypatch_auth):
+    config = {
+        "sheets": [
+            {
+                "spreadsheet_url": "dummy_url",
+                "named_range": "RangeMulti"
+            }
+        ],
+        "credentials": "/dev/null",
+        "bigquery_column_normalization": False
+    }
+    tap = TapGoogleSheetsNamedRange(config=config)
+    stream = tap.discover_streams()[0]
+    records = list(stream.get_records(None))
+
+    assert records[0]["_row_number"] == 1
+    assert records[1]["_row_number"] == 2
 
 def test_multiple_sheets(monkeypatch_auth):
     config = {

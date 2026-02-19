@@ -77,12 +77,15 @@ class GoogleSheetsStream(Stream):
         # All columns as string type, dynamically inferred from the header row
         _, header = self.get_worksheet_and_header()
         return th.PropertiesList(
-            *[th.Property(col, th.StringType) for col in header]
+            *[th.Property(col, th.StringType) for col in header],
+            th.Property("_row_number", th.IntegerType),
         ).to_dict()
 
     def get_records(self, context: dict | None) -> t.Iterable[dict]:
         values, header = self.get_worksheet_and_header()
-        for row in values[1:]:
+        for row_number, row in enumerate(values[1:], start=1):
             # Pad row if shorter than header
             row = row + [None] * (len(header) - len(row))
-            yield {header[i]: (row[i] if row[i] is not None else "") for i in range(len(header))}
+            record = {header[i]: (row[i] if row[i] is not None else "") for i in range(len(header))}
+            record["_row_number"] = row_number
+            yield record
