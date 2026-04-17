@@ -103,6 +103,12 @@ tap-googlesheetsrange --help
 tap-googlesheetsrange --config CONFIG --discover > ./catalog.json
 ```
 
+### Output Fields
+
+- The tap emits one record per data row in the named range.
+- Header-derived columns are emitted as strings.
+- `_row_number` is a system-generated integer field that starts at `1` for the first data row after the header.
+
 ## Developer Resources
 
 Follow these instructions to contribute to this project.
