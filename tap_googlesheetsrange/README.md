@@ -32,7 +32,8 @@ A Singer tap for extracting data from a named range in a Google Sheet using a Go
 ## Output
 
 - The tap emits all rows from the specified named range as Singer records.
-- All columns are treated as strings.
+- Header-derived columns are treated as strings.
+- `_row_number` is a system-generated integer field that starts at `1` for the first data row after the header.
 - No state/bookmarking is supported; all rows are emitted as-is.
 
 ## Local Development
