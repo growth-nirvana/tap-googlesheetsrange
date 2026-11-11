@@ -221,3 +221,13 @@ def test_access_token_instead_of_a_key(monkeypatch):
     assert auth.email == "reader@p.iam.gserviceaccount.com"
     with pytest.raises(ValueError):
         streams_module.GoogleSheetsAuthenticator(None)
+
+
+def test_refused_credentials_stop_the_run(monkeypatch):
+    from tap_googlesheetsrange.sheets import SheetsAuthError
+
+    fake = FakeSheets(books())
+    fake.spreadsheets["book2222222222222222222"]["error"] = api_error(401, "Request had invalid authentication credentials.", "UNAUTHENTICATED")
+    install(monkeypatch, fake)
+    with pytest.raises(SheetsAuthError, match="401"):
+        TapGoogleSheetsNamedRange(config={"sheets": [{"spreadsheet_url": URL2, "sheet": "Sheet1", "stream_name": "e"}], "credentials": "/dev/null"})

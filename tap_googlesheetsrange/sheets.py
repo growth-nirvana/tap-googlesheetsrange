@@ -46,6 +46,11 @@ ERROR = "error"
 OK = "ok"
 
 
+class SheetsAuthError(RuntimeError):
+    """The credentials themselves were refused (401) or the API is off for their project: no
+    sheet can be read, so the run stops instead of failing every stream one by one."""
+
+
 class SheetError(RuntimeError):
     """One sheet entry can't be read. ``kind`` says why; the message says what to do."""
 
@@ -197,8 +202,10 @@ def classify(err: APIError, spec: SheetSpec, email: str | None) -> SheetError:
     message = str(error.get("message") or "")
     reason = str(error.get("status") or "")
     who = email or "the service account"
+    if status == 401:
+        raise SheetsAuthError(f"Google refused the credentials of {who} (401 UNAUTHENTICATED)")
     if status == 403 and ("has not been used" in message or "disabled" in message or reason == "SERVICE_DISABLED"):
-        return SheetError(API_DISABLED, "the Google Sheets API is not enabled for the service account's project")
+        raise SheetsAuthError(f"the Google Sheets API is not enabled for the project of {who}")
     if status == 403:
         return SheetError(NOT_SHARED, f"the spreadsheet is not shared with {who}: open it, Share, add {who} as a Viewer")
     if status == 404:
@@ -310,7 +317,22 @@ class SheetsReader:
         if value_render_option != "FORMATTED_VALUE":
             self.params["dateTimeRenderOption"] = "FORMATTED_STRING"
         self.email = email
-        self.call = call
+
+        def guarded(func: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
+            wrapped = call(func)
+
+            def run(*args: t.Any, **kwargs: t.Any) -> t.Any:
+                from google.auth.exceptions import RefreshError
+
+                try:
+                    return wrapped(*args, **kwargs)
+                except RefreshError:
+                    # A bare access token Google refused (expired or not this account's).
+                    raise SheetsAuthError(f"Google refused the access token of {email or 'the service account'}") from None
+
+            return run
+
+        self.call = guarded
         self._reads: dict[str, Read | SheetError] = {}
         self._metadata: dict[str, dict[str, t.Any] | SheetError] = {}
 
