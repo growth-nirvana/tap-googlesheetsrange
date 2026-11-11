@@ -204,3 +204,20 @@ def test_empty_tab(monkeypatch):
     install(monkeypatch, fake)
     tap = TapGoogleSheetsNamedRange(config={"sheets": [{"spreadsheet_url": URL2, "sheet": "Sheet1", "stream_name": "e"}], "credentials": "/dev/null"})
     assert tap.streams["e"].status()["status"] == "empty"
+
+
+def test_access_token_instead_of_a_key(monkeypatch):
+    from tap_googlesheetsrange import streams as streams_module
+
+    seen = {}
+
+    def authorize(creds):
+        seen["token"] = creds.token
+        return "client"
+
+    monkeypatch.setattr(streams_module.gspread, "authorize", authorize)
+    auth = streams_module.GoogleSheetsAuthenticator(None, access_token="ya29.fake", email="reader@p.iam.gserviceaccount.com")
+    assert seen["token"] == "ya29.fake"
+    assert auth.email == "reader@p.iam.gserviceaccount.com"
+    with pytest.raises(ValueError):
+        streams_module.GoogleSheetsAuthenticator(None)

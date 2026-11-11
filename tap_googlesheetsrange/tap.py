@@ -53,9 +53,22 @@ class TapGoogleSheetsNamedRange(Tap):
         th.Property(
             "credentials",
             th.StringType,
-            required=True,
+            required=False,
             secret=True,
-            description="Google service account credentials as a JSON string or a file path.",
+            description="Google service account credentials as a JSON string or a file path. Or access_token.",
+        ),
+        th.Property(
+            "access_token",
+            th.StringType,
+            required=False,
+            secret=True,
+            description="An OAuth access token for the service account (minted by impersonation, so no key is kept). Instead of credentials.",
+        ),
+        th.Property(
+            "service_account_email",
+            th.StringType,
+            required=False,
+            description="With access_token: the account's email, for messages (\"share it with ...\").",
         ),
         th.Property(
             "bigquery_column_normalization",

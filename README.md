@@ -52,6 +52,7 @@ Fields:
 Top-level options added in 1.3.0 (all off by default, so existing configs behave as before):
 - `value_render_option`: `FORMATTED_VALUE` (default, values as the sheet shows them) or `UNFORMATTED_VALUE` (numbers as numbers; dates stay formatted).
 - `include_sheet_row`: adds `_sheet_row`, each record's row number on the sheet.
+- `access_token` (+ `service_account_email`): instead of `credentials`, a token minted for the service account by impersonation, so no key is kept anywhere.
 - `check_report_path`: discovery writes each entry's status there as JSON (`ok` with row and column counts, or `not_shared`, `not_found`, `range_not_found`, `api_disabled`, `empty`, with a message saying what to fix). No cell values.
 
 Reads are grouped: one request per spreadsheet (values:batchGet) for discovery and one for the sync. Rate limits (429), 5xx and dropped connections are retried with backoff. An entry that can't be read doesn't stop the others: discovery still lists it, its sync fails, the other streams sync, and the tap then logs `CRITICAL Streams failed: <names>` and exits 1.

@@ -111,9 +111,18 @@ READONLY_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
 
 class GoogleSheetsAuthenticator:
-    """The service account (credentials: its JSON key, as a string or a file path)."""
+    """The service account: its JSON key (credentials, a string or a file path), or an access
+    token minted for it by the caller (access_token, e.g. by impersonation; no key at all)."""
 
-    def __init__(self, credentials: str):
+    def __init__(self, credentials: str | None = None, *, access_token: str | None = None, email: str | None = None):
+        if access_token:
+            from google.oauth2.credentials import Credentials
+
+            self.creds_dict = {"client_email": email} if email else {}
+            self.gc = gspread.authorize(Credentials(token=access_token))
+            return
+        if not credentials:
+            raise ValueError("set credentials (a service account key) or access_token")
         if os.path.isfile(credentials):
             with open(credentials, "r") as f:
                 self.creds_dict = json.load(f)
@@ -133,7 +142,11 @@ def _get_shared_client(tap) -> gspread.Client:
     """One gspread client (one token exchange) for every stream of the run."""
     client = getattr(tap, "_gsheets_client", None)
     if client is None:
-        auth = GoogleSheetsAuthenticator(tap.config["credentials"])
+        auth = GoogleSheetsAuthenticator(
+            tap.config.get("credentials"),
+            access_token=tap.config.get("access_token"),
+            email=tap.config.get("service_account_email"),
+        )
         client = auth.get_client()
         tap._gsheets_client = client
         tap._gsheets_email = auth.email
