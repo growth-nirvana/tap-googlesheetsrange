@@ -7,16 +7,11 @@ aborted on the first quota-exceeded response and also fired duplicate
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from gspread.exceptions import APIError
 
 from tap_googlesheetsrange import streams as streams_module
-from tap_googlesheetsrange.streams import (
-    GoogleSheetsStream,
-    with_gsheets_retry,
-)
+from tap_googlesheetsrange.streams import with_gsheets_retry
 from tap_googlesheetsrange.tap import TapGoogleSheetsNamedRange
 
 
@@ -98,116 +93,42 @@ def test_non_retryable_error_not_retried():
     assert sleeps == []
 
 
-class _CountingSpreadsheet:
-    """Spreadsheet stub that tracks how many times values_get was called."""
+def test_connection_errors_are_retried():
+    import requests
 
-    def __init__(self):
-        self.values_calls: list[str] = []
+    calls = {"n": 0}
 
-    def values_get(self, named_range: str):
-        self.values_calls.append(named_range)
-        return {"values": [["A", "B"], ["1", "2"]]}
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.exceptions.ConnectionError("reset")
+        return "ok"
 
-
-class _CountingClient:
-    """gspread client stub that tracks open_by_url invocations per URL."""
-
-    def __init__(self):
-        self.open_calls: list[str] = []
-        self._sheets: dict[str, _CountingSpreadsheet] = {}
-
-    def open_by_url(self, url: str):
-        self.open_calls.append(url)
-        if url not in self._sheets:
-            self._sheets[url] = _CountingSpreadsheet()
-        return self._sheets[url]
+    sleeps: list[float] = []
+    assert with_gsheets_retry(flaky, sleep=sleeps.append)() == "ok"
+    assert len(sleeps) == 1
 
 
-def _install_fake_client(monkeypatch) -> _CountingClient:
-    """Force the tap to use a counting in-memory client instead of real gspread."""
-    client = _CountingClient()
-    monkeypatch.setattr(
-        streams_module,
-        "_get_shared_client",
-        lambda tap: client,
-    )
-    # Route the legacy authenticator property to the same client for any
-    # code path that still goes through it.
-    monkeypatch.setattr(
-        GoogleSheetsStream,
-        "authenticator",
-        property(lambda self: SimpleNamespace(get_client=lambda: client)),
-    )
-    return client
+def test_values_read_retries_on_quota_then_succeeds(monkeypatch):
+    """A 429 on a read must not abort the sync; the tap retries it."""
+    from tests.fake_sheets import FakeSheets, install
 
-
-def test_open_by_url_deduplicated_across_streams(monkeypatch):
-    """Two streams on the same spreadsheet should only call open_by_url once."""
-    client = _install_fake_client(monkeypatch)
-    shared_url = "https://docs.google.com/spreadsheets/d/shared"
-    config = {
-        "sheets": [
-            {
-                "spreadsheet_url": shared_url,
-                "named_range": "RangeA",
-                "stream_name": "stream_a",
-            },
-            {
-                "spreadsheet_url": shared_url,
-                "named_range": "RangeB",
-                "stream_name": "stream_b",
-            },
-            {
-                "spreadsheet_url": "https://docs.google.com/spreadsheets/d/other",
-                "named_range": "RangeC",
-                "stream_name": "stream_c",
-            },
-        ],
-        "credentials": "/dev/null",
-        "bigquery_column_normalization": False,
-    }
-    tap = TapGoogleSheetsNamedRange(config=config)
-    for stream in tap.discover_streams():
-        stream.get_worksheet_and_header()
-
-    # 3 streams but only 2 distinct URLs -> at most 2 open_by_url reads.
-    assert client.open_calls.count(shared_url) == 1
-    assert len(client.open_calls) == 2
-
-
-def test_values_get_retries_on_quota_then_succeeds(monkeypatch):
-    """A 429 on values_get must not abort the sync; the tap should retry."""
-    client = _install_fake_client(monkeypatch)
+    fake = install(monkeypatch, FakeSheets({"quota00000000000000000": {"tabs": [("S", 0)], "cells": {"S": [["A", "B"], ["1", "2"]]}}}))
     monkeypatch.setattr(streams_module.time, "sleep", lambda _s: None)
-
-    url = "https://docs.google.com/spreadsheets/d/quota"
-    sheet = _CountingSpreadsheet()
-
+    original = fake.values_get
     attempts = {"n": 0}
-    original_values_get = sheet.values_get
 
-    def flaky_values_get(named_range: str):
+    def flaky(*args, **kwargs):
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise _make_api_error(429, retry_after="0")
-        return original_values_get(named_range)
+        return original(*args, **kwargs)
 
-    sheet.values_get = flaky_values_get  # type: ignore[assignment]
-    client._sheets[url] = sheet
-
-    config = {
-        "sheets": [
-            {
-                "spreadsheet_url": url,
-                "named_range": "RangeA",
-                "stream_name": "stream_a",
-            },
-        ],
+    fake.values_get = flaky
+    tap = TapGoogleSheetsNamedRange(config={
+        "sheets": [{"spreadsheet_url": "https://docs.google.com/spreadsheets/d/quota00000000000000000/edit", "sheet": "S", "stream_name": "a"}],
         "credentials": "/dev/null",
         "bigquery_column_normalization": False,
-    }
-    tap = TapGoogleSheetsNamedRange(config=config)
-    stream = tap.discover_streams()[0]
-    _, header = stream.get_worksheet_and_header()
-    assert header == ["A", "B"]
+    })
+    assert tap.streams["a"].get_worksheet_and_header()[1] == ["A", "B"]
     assert attempts["n"] == 2

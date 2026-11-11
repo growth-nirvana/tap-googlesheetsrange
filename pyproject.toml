@@ -1,6 +1,6 @@
 [project]
 name = "tap-googlesheetsrange"
-version = "0.0.1"
+version = "1.3.0"
 description = "Singer tap for GoogleSheetsRange, built with the Meltano Singer SDK."
 readme = "README.md"
 authors = [{ name = "Jesse Ocon", email = "jesse.ocon@growthnirvana.com" }]

@@ -34,10 +34,27 @@ pipx install git+https://github.com/ORG_NAME/tap-googlesheetsrange.git@main
 | credentials                   | string  | Yes      | Google service account credentials as a JSON string or a file path.         |
 | bigquery_column_normalization | boolean | No       | If true, normalize column names to be BigQuery-compliant. Default: true.    |
 
-Each entry in the `sheets` array should be an object with the following fields:
-- `spreadsheet_url` (string, required): The URL of the Google Sheet.
-- `named_range` (string, required): The named range to extract.
-- `stream_name` (string, optional): The name to use for the stream (defaults to the named range). **Must be unique across all sheets.**
+Each entry in the `sheets` array is one stream. It points at its cells in one of these ways (first match wins):
+
+- `named_range`: a named range of the spreadsheet;
+- `sheet`: a tab's title. The whole tab is read as far as it has values, so nobody has to create or grow a named range. Add `range` (A1, e.g. `A1:F` or `B3:H200`) to read part of it;
+- `range` alone: an A1 range, with or without a tab (`Clients!A:F`);
+- none of them: the tab the URL points at (`#gid=` in the URL), else the first tab.
+
+Fields:
+- `spreadsheet_url` (string, required): the spreadsheet's URL (or its id).
+- `named_range`, `sheet`, `range` (strings, optional): see above.
+- `stream_name` (string, optional): the stream's name (defaults to the named range, tab or range). **Must be unique across all sheets.**
+- `header_row` (integer or `"auto"`, default 1): the header's row within the range. `0`: no header (columns are named after their letters, `column_a`...). `"auto"`: the first row with a value.
+- `skip_blank_rows` (boolean, default false): leave out rows with no value.
+- `keep_unnamed_columns` (boolean, default false): keep values in columns with no header text, named after their letter (`column_g`).
+
+Top-level options added in 1.3.0 (all off by default, so existing configs behave as before):
+- `value_render_option`: `FORMATTED_VALUE` (default, values as the sheet shows them) or `UNFORMATTED_VALUE` (numbers as numbers; dates stay formatted).
+- `include_sheet_row`: adds `_sheet_row`, each record's row number on the sheet.
+- `check_report_path`: discovery writes each entry's status there as JSON (`ok` with row and column counts, or `not_shared`, `not_found`, `range_not_found`, `api_disabled`, `empty`, with a message saying what to fix). No cell values.
+
+Reads are grouped: one request per spreadsheet (values:batchGet) for discovery and one for the sync. Rate limits (429), 5xx and dropped connections are retried with backoff. An entry that can't be read doesn't stop the others: discovery still lists it, its sync fails, the other streams sync, and the tap then logs `CRITICAL Streams failed: <names>` and exits 1.
 
 > **Note:**
 > All `stream_name` values must be unique across your config. If two or more sheets use the same stream name, the tap will fail to start and provide a detailed error message showing the conflicting entries. This helps prevent data from being overwritten or misrouted.
