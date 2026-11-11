@@ -9,10 +9,12 @@ import os
 import random
 import time
 import gspread
+import requests
 from gspread.exceptions import APIError
 from singer_sdk import Stream
 from singer_sdk import typing as th
-from tap_googlesheetsrange.bq_column_normalizer import normalize_bq_column_names
+
+from tap_googlesheetsrange.sheets import SheetError, SheetSpec, SheetsReader, Table, build_table
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ LOGGER = logging.getLogger(__name__)
 _RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
 # Defaults chosen so we cleanly absorb a full 60s/user/min quota window.
-_DEFAULT_MAX_RETRIES = 6
+_DEFAULT_MAX_RETRIES = 8
 _DEFAULT_BASE_DELAY = 2.0
 _DEFAULT_MAX_DELAY = 64.0
 
@@ -73,11 +75,18 @@ def with_gsheets_retry(
         while True:
             try:
                 return func(*args, **kwargs)
-            except APIError as err:
-                status = _status_from_api_error(err)
-                if status not in _RETRYABLE_STATUSES or attempt >= max_retries:
+            except (APIError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as err:
+                if isinstance(err, APIError):
+                    status = _status_from_api_error(err)
+                    retryable = status in _RETRYABLE_STATUSES
+                    server_hint = _retry_after_seconds(err)
+                else:
+                    # A dropped connection or a timeout: the same request again is safe (reads only).
+                    status = type(err).__name__
+                    retryable = True
+                    server_hint = None
+                if not retryable or attempt >= max_retries:
                     raise
-                server_hint = _retry_after_seconds(err)
                 if server_hint is not None:
                     delay = min(server_hint, max_delay)
                 else:
@@ -97,145 +106,140 @@ def with_gsheets_retry(
     return wrapper
 
 
+# Read-only: the tap never writes to a spreadsheet.
+READONLY_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+
 class GoogleSheetsAuthenticator:
-    """Custom authenticator for Google Sheets using a service account."""
-    def __init__(self, credentials: str):
-        # Credentials can be a JSON string or a file path
+    """The service account: its JSON key (credentials, a string or a file path), or an access
+    token minted for it by the caller (access_token, e.g. by impersonation; no key at all)."""
+
+    def __init__(self, credentials: str | None = None, *, access_token: str | None = None, email: str | None = None):
+        if access_token:
+            from google.oauth2.credentials import Credentials
+
+            self.creds_dict = {"client_email": email} if email else {}
+            self.gc = gspread.authorize(Credentials(token=access_token))
+            return
+        if not credentials:
+            raise ValueError("set credentials (a service account key) or access_token")
         if os.path.isfile(credentials):
             with open(credentials, "r") as f:
                 self.creds_dict = json.load(f)
         else:
             self.creds_dict = json.loads(credentials)
-        self.gc = gspread.service_account_from_dict(self.creds_dict)
+        self.gc = gspread.service_account_from_dict(self.creds_dict, scopes=READONLY_SCOPES)
+
+    @property
+    def email(self) -> str | None:
+        return self.creds_dict.get("client_email")
 
     def get_client(self):
         return self.gc
 
 
 def _get_shared_client(tap) -> gspread.Client:
-    """Return a single gspread client shared across all streams on the tap.
-
-    We used to build a new ``GoogleSheetsAuthenticator`` per stream, which
-    performed a separate OAuth token exchange each time. Sharing the client
-    keeps auth work to a single request per tap invocation.
-    """
+    """One gspread client (one token exchange) for every stream of the run."""
     client = getattr(tap, "_gsheets_client", None)
     if client is None:
-        client = GoogleSheetsAuthenticator(tap.config["credentials"]).get_client()
+        auth = GoogleSheetsAuthenticator(
+            tap.config.get("credentials"),
+            access_token=tap.config.get("access_token"),
+            email=tap.config.get("service_account_email"),
+        )
+        client = auth.get_client()
         tap._gsheets_client = client
+        tap._gsheets_email = auth.email
     return client
 
 
-def _get_shared_spreadsheet(tap, client: gspread.Client, url: str):
-    """Return a cached ``Spreadsheet`` for ``url`` to avoid duplicate metadata reads.
-
-    Calling ``client.open_by_url`` triggers a ``fetch_sheet_metadata`` read
-    request on the Sheets API. Multiple streams may reference the same
-    workbook, so we cache the opened spreadsheet on the tap.
-    """
-    cache = getattr(tap, "_spreadsheet_cache", None)
-    if cache is None:
-        cache = {}
-        tap._spreadsheet_cache = cache
-    if url not in cache:
-        cache[url] = with_gsheets_retry(client.open_by_url)(url)
-    return cache[url]
-
-
-def _get_cached_values(tap, spreadsheet, url: str, named_range: str):
-    """Return a cached ``values_get`` payload for (url, named_range).
-
-    ``discover_streams`` may run multiple times during a single Meltano-SDK
-    invocation (e.g. once for catalog materialization and once more for
-    ``sync_all``), which previously issued a fresh ``values_get`` read per
-    call. Caching the payload on the tap keeps each named range to a single
-    Sheets read per run and is the biggest single reduction in quota usage.
-    """
-    cache = getattr(tap, "_values_cache", None)
-    if cache is None:
-        cache = {}
-        tap._values_cache = cache
-    key = (url, named_range)
-    if key not in cache:
-        cache[key] = with_gsheets_retry(spreadsheet.values_get)(named_range)
-    return cache[key]
+def _get_reader(tap) -> SheetsReader:
+    """The run's reader: each entry is read once (grouped per spreadsheet) and kept."""
+    reader = getattr(tap, "_sheets_reader", None)
+    if reader is None:
+        client = _get_shared_client(tap)
+        reader = SheetsReader(
+            client.http_client,
+            value_render_option=tap.config.get("value_render_option") or "FORMATTED_VALUE",
+            email=getattr(tap, "_gsheets_email", None),
+            call=with_gsheets_retry,
+        )
+        tap._sheets_reader = reader
+    # Every entry known so far, in one request per spreadsheet (entries read already are kept).
+    reader.prefetch(list(getattr(tap, "_sheet_specs", None) or []))
+    return reader
 
 
 class GoogleSheetsStream(Stream):
+    """One configured sheet entry. Every column is text; typing happens downstream."""
+
     name = "named_range_stream"
     primary_keys = []
     replication_key = None
 
-    RESERVED_KEYWORDS = {"where", "view"}
-    FORBIDDEN_PREFIXES = ["_TABLE_", "_FILE_", "_PARTITION", "_ROW_TIMESTAMP", "__ROOT__", "_COLIDENTIFIER"]
-
     def __init__(self, tap, name=None, sheet_config=None):
         self.sheet_config = sheet_config or {}
-        self._worksheet = None
-        self._header = None
-        # Pass a dummy schema to satisfy the SDK; the real schema is provided by the property
+        self.spec = SheetSpec.from_config({**self.sheet_config, "stream_name": name or self.sheet_config.get("stream_name")})
+        self._table: Table | None = None
+        self.error: SheetError | None = None
         super().__init__(tap, name=(name or self.name), schema={})
 
     @property
-    def authenticator(self):
-        """Backwards-compatible accessor that returns a shim with ``get_client``.
+    def sheet_rows(self) -> bool:
+        return bool(self.config.get("include_sheet_row", False))
 
-        Tests and existing subclasses may call ``self.authenticator.get_client()``.
-        We now resolve through the tap-level shared client so every stream uses
-        the same underlying gspread session.
-        """
-        tap = self._tap
-        client = _get_shared_client(tap)
-
-        class _SharedClient:
-            def get_client(self_inner):
-                return client
-
-        return _SharedClient()
+    def table(self) -> Table:
+        """The entry's columns and rows; raises SheetError when it can't be read."""
+        if self._table is None:
+            if self.error is not None:
+                raise self.error
+            try:
+                read = _get_reader(self._tap).read(self.spec)
+                self._table = build_table(
+                    self.spec,
+                    read,
+                    normalize=bool(self.config.get("bigquery_column_normalization", True)),
+                    sheet_rows=self.sheet_rows,
+                )
+            except SheetError as err:
+                self.error = err
+                raise
+        return self._table
 
     def get_worksheet_and_header(self):
-        if self._worksheet is not None and self._header is not None:
-            return self._worksheet, self._header
-        gc = self.authenticator.get_client()
-        url = self.sheet_config["spreadsheet_url"]
-        named_range = self.sheet_config["named_range"]
-        spreadsheet = _get_shared_spreadsheet(self._tap, gc, url)
-        payload = _get_cached_values(self._tap, spreadsheet, url, named_range)
-        values = payload.get("values", [])
-        if not values:
-            raise RuntimeError("No data found in the named range.")
-        raw_header = values[0]
-        if self.config.get("bigquery_column_normalization", False):
-            header = normalize_bq_column_names(
-                raw_header,
-                reserved_keywords=self.RESERVED_KEYWORDS,
-                forbidden_prefixes=self.FORBIDDEN_PREFIXES,
-            )
-        else:
-            header = []
-            for idx, col in enumerate(raw_header):
-                if col.strip() == "":
-                    header.append(f"column_{idx+1}")
-                else:
-                    header.append(col)
-        self._worksheet = values
-        self._header = header
-        return values, header
+        """(rows, column names): kept for callers of the earlier API."""
+        table = self.table()
+        return table.rows, table.columns
 
     @property
     def schema(self):
-        # All columns as string type, dynamically inferred from the header row
-        _, header = self.get_worksheet_and_header()
+        # Discovery never fails on one entry: an unreadable one has only the row columns, and
+        # its sync fails (the tap goes on with the others, then names it).
+        try:
+            columns = self.table().columns
+        except SheetError:
+            columns = []
+        extra = [th.Property("_sheet_row", th.IntegerType)] if self.sheet_rows else []
         return th.PropertiesList(
-            *[th.Property(col, th.StringType) for col in header],
+            *[th.Property(col, th.StringType) for col in columns],
             th.Property("_row_number", th.IntegerType),
+            *extra,
         ).to_dict()
 
+    def status(self) -> dict[str, t.Any]:
+        """What a check reports for this entry (counts and names only, never values)."""
+        try:
+            table = self.table()
+        except SheetError as err:
+            return {"status": err.kind, "message": str(err), "target": self.spec.describe()}
+        return {
+            "status": "ok",
+            "target": self.spec.describe(),
+            "rows": len(table.rows),
+            "columns": len(table.columns),
+            "column_names": list(table.columns),
+            "header_row": table.header_sheet_row,
+        }
+
     def get_records(self, context: dict | None) -> t.Iterable[dict]:
-        values, header = self.get_worksheet_and_header()
-        for row_number, row in enumerate(values[1:], start=1):
-            # Pad row if shorter than header
-            row = row + [None] * (len(header) - len(row))
-            record = {header[i]: (row[i] if row[i] is not None else "") for i in range(len(header))}
-            record["_row_number"] = row_number
-            yield record
+        yield from self.table().rows
