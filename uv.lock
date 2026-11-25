@@ -196,6 +196,11 @@ wheels = [
 ]
 
 [[package]]
+name = "aria-sheets-table"
+version = "1.4.0"
+source = { directory = "packages/sheets-table" }
+
+[[package]]
 name = "async-timeout"
 version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2323,9 +2328,10 @@ wheels = [
 
 [[package]]
 name = "tap-googlesheetsrange"
-version = "1.3.0"
+version = "1.4.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aria-sheets-table" },
     { name = "google-auth" },
     { name = "gspread" },
     { name = "requests" },
@@ -2356,6 +2362,7 @@ typing = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aria-sheets-table", directory = "packages/sheets-table" },
     { name = "google-auth" },
     { name = "gspread" },
     { name = "requests", specifier = "~=2.32.3" },
