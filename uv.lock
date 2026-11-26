@@ -197,8 +197,8 @@ wheels = [
 
 [[package]]
 name = "aria-sheets-table"
-version = "1.4.0"
-source = { directory = "packages/sheets-table" }
+version = "1.5.0"
+source = { editable = "packages/sheets-table" }
 
 [[package]]
 name = "async-timeout"
@@ -2328,7 +2328,7 @@ wheels = [
 
 [[package]]
 name = "tap-googlesheetsrange"
-version = "1.4.0"
+version = "1.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "aria-sheets-table" },
@@ -2362,7 +2362,7 @@ typing = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aria-sheets-table", directory = "packages/sheets-table" },
+    { name = "aria-sheets-table", editable = "packages/sheets-table" },
     { name = "google-auth" },
     { name = "gspread" },
     { name = "requests", specifier = "~=2.32.3" },

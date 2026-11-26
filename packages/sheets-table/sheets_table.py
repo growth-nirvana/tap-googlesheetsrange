@@ -91,6 +91,7 @@ class SheetSpec:
     header_row: int | str = 1
     skip_blank_rows: bool = False
     keep_unnamed_columns: bool = False
+    skip_footer: bool = False
 
     @classmethod
     def from_config(cls, cfg: dict[str, t.Any]) -> SheetSpec:
@@ -124,6 +125,7 @@ class SheetSpec:
             header_row=header,
             skip_blank_rows=bool(cfg.get("skip_blank_rows", False)),
             keep_unnamed_columns=bool(cfg.get("keep_unnamed_columns", False)),
+            skip_footer=bool(cfg.get("skip_footer", False)),
         )
 
     @property
@@ -183,6 +185,62 @@ class Table:
     columns: list[str]
     rows: list[dict[str, t.Any]] = field(default_factory=list)
     header_sheet_row: int | None = None
+    # skip_footer: the rows left out as a footer (sheet_row, text), or why none were.
+    footer: list[dict[str, t.Any]] = field(default_factory=list)
+    footer_kept: str | None = None
+
+
+# A footer has at most this many rows with text, and never more than the data rows above it.
+FOOTER_MAX_ROWS = 10
+TOTAL_ROW = re.compile(r"^(grand\s+)?totals?\b", re.IGNORECASE)
+
+
+def _shape(text: str) -> str:
+    """A value's look: runs of digits become 9, of letters a ("006FX01AAA" -> "9a9a")."""
+    return re.sub(r"[^\W\d_]+", "a", re.sub(r"\d+", "9", text.strip()))
+
+
+def find_footer(data: list[list[t.Any]], width: int) -> tuple[int | None, str | None]:
+    """Where the footer starts in data (rows under the header), or None, and why none was taken.
+
+    A footer is the block of rows at the very bottom after the last data row, each of them blank,
+    a total ("Total 3,020", "Grand Total"), or a line of text in at most two cells that doesn't look
+    like that column's values ("Confidential Information - Do Not Distribute", a copyright).
+    Only rows at the bottom count: a short row in the middle of the data always loads.
+    """
+    def filled(row: list[t.Any]) -> list[int]:
+        return [i for i, c in enumerate(row[:width]) if not _blank(c)]
+
+    full = [row for row in data if len(filled(row)) > 2]
+    usual: dict[int, set[str]] = {}
+    for row in full:
+        for i in filled(row):
+            usual.setdefault(i, set()).add(_shape(_text(row[i])))
+
+    def footer_like(row: list[t.Any]) -> bool:
+        cells = filled(row)
+        if not cells:
+            return True
+        if TOTAL_ROW.match(_text(row[cells[0]]).strip()):
+            return True
+        if width < 3 or len(cells) > 2:
+            return False
+        return all(_shape(_text(row[i])) not in usual.get(i, set()) for i in cells)
+
+    start = len(data)
+    while start > 0 and footer_like(data[start - 1]):
+        start -= 1
+    footer = data[start:]
+    if not footer or all(not filled(row) for row in footer):
+        return None, None
+    # Blank rows don't count toward the limits; the rows with text do.
+    text_rows = sum(1 for row in footer if filled(row))
+    remaining = sum(1 for row in data[:start] if filled(row))
+    if text_rows > FOOTER_MAX_ROWS:
+        return None, f"the last {text_rows} rows look like a footer, more than {FOOTER_MAX_ROWS}: all of them load"
+    if text_rows > remaining:
+        return None, f"the last {text_rows} rows look like a footer, more than the {remaining} rows above them: all of them load"
+    return start, None
 
 
 RESERVED_KEYWORDS = {"where", "view"}
@@ -248,8 +306,14 @@ def build_table(
     first_data_row = None
     if read.start_row is not None:
         first_data_row = read.start_row + (header_at + 1 if header_at is not None else 0)
+    footer_at, footer_kept = find_footer(data, width) if spec.skip_footer else (None, None)
+    footer: list[dict[str, t.Any]] = []
     rows: list[dict[str, t.Any]] = []
     for offset, row in enumerate(data):
+        if footer_at is not None and offset >= footer_at:
+            text = " ".join(_text(c).strip() for c in row[:width] if not _blank(c))
+            footer.append({"sheet_row": (first_data_row + offset) if first_data_row is not None else None, "text": text[:200]})
+            continue
         if spec.skip_blank_rows and all(_blank(c) for c in row[:width]):
             continue
         cells = row[:width] + [None] * (width - len(row[:width]))
@@ -259,7 +323,7 @@ def build_table(
             record["_sheet_row"] = (first_data_row + offset) if first_data_row is not None else None
         rows.append(record)
     header_sheet_row = (read.start_row + header_at) if (read.start_row is not None and header_at is not None) else None
-    return Table(columns=columns, rows=rows, header_sheet_row=header_sheet_row)
+    return Table(columns=columns, rows=rows, header_sheet_row=header_sheet_row, footer=footer, footer_kept=footer_kept)
 
 def normalize_bq_column_names(
     headers: List[str],
