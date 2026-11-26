@@ -91,7 +91,8 @@ class SheetSpec:
     header_row: int | str = 1
     skip_blank_rows: bool = False
     keep_unnamed_columns: bool = False
-    skip_footer: bool = False
+    # The rows at the bottom to leave out: "auto" (find_footer), or how many (0: none).
+    footer_rows: int | str = 0
 
     @classmethod
     def from_config(cls, cfg: dict[str, t.Any]) -> SheetSpec:
@@ -125,8 +126,12 @@ class SheetSpec:
             header_row=header,
             skip_blank_rows=bool(cfg.get("skip_blank_rows", False)),
             keep_unnamed_columns=bool(cfg.get("keep_unnamed_columns", False)),
-            skip_footer=bool(cfg.get("skip_footer", False)),
+            footer_rows=_footer_rows(cfg, str(name)),
         )
+
+    @property
+    def skip_footer(self) -> bool:
+        return self.footer_rows == "auto" or (isinstance(self.footer_rows, int) and self.footer_rows > 0)
 
     @property
     def spreadsheet_id(self) -> str:
@@ -158,6 +163,24 @@ class SheetSpec:
         return "the URL's tab"
 
 
+def _footer_rows(cfg: dict[str, t.Any], name: str) -> int | str:
+    """footer_rows: "auto" or a count; skip_footer (1.5.0's switch) still means "auto"."""
+    value = cfg.get("footer_rows")
+    if value is None:
+        return "auto" if cfg.get("skip_footer") else 0
+    if isinstance(value, str) and value.strip().lower() == "auto":
+        return "auto"
+    if isinstance(value, bool):
+        raise ValueError(f"{name}: footer_rows is \"auto\" or how many rows to leave out at the bottom")
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}: footer_rows is \"auto\" or how many rows to leave out at the bottom") from None
+    if count < 0:
+        raise ValueError(f"{name}: footer_rows can't be negative")
+    return count
+
+
 @dataclass
 class Read:
     """What the API answered for one entry: the values and where they start on the sheet."""
@@ -185,7 +208,7 @@ class Table:
     columns: list[str]
     rows: list[dict[str, t.Any]] = field(default_factory=list)
     header_sheet_row: int | None = None
-    # skip_footer: the rows left out as a footer (sheet_row, text), or why none were.
+    # footer_rows: the rows left out at the bottom (sheet_row, text), or why none were.
     footer: list[dict[str, t.Any]] = field(default_factory=list)
     footer_kept: str | None = None
 
@@ -306,7 +329,12 @@ def build_table(
     first_data_row = None
     if read.start_row is not None:
         first_data_row = read.start_row + (header_at + 1 if header_at is not None else 0)
-    footer_at, footer_kept = find_footer(data, width) if spec.skip_footer else (None, None)
+    if spec.footer_rows == "auto":
+        footer_at, footer_kept = find_footer(data, width)
+    elif spec.footer_rows and spec.footer_rows >= len(data):
+        footer_at, footer_kept = None, f"the table has {len(data)} rows under the header, not more than {spec.footer_rows}: all of them load"
+    else:
+        footer_at, footer_kept = (len(data) - spec.footer_rows, None) if spec.footer_rows else (None, None)
     footer: list[dict[str, t.Any]] = []
     rows: list[dict[str, t.Any]] = []
     for offset, row in enumerate(data):

@@ -59,3 +59,29 @@ def test_nothing_is_left_out_past_ten_footer_rows():
     many = [[f"Note number {i} about this report"] for i in range(11)]
     t = table([HEADER, *(BODY * 10), *many])
     assert len(t.rows) == 41 and "more than 10" in t.footer_kept
+
+
+def counted(values, footer_rows):
+    spec = SheetSpec.from_config(
+        {"stream_name": "x", "spreadsheet_url": "1hNMlbLOwhkol0isTS2Zg7gpppVOUO5xBScZR3ZM8fcs",
+         "header_row": "auto", "skip_blank_rows": True, "footer_rows": footer_rows}
+    )
+    return build_table(spec, Read(values, 1, 0), normalize=True, sheet_rows=True)
+
+
+def test_a_count_leaves_out_exactly_that_many_rows_at_the_bottom():
+    # Keep the Total row: leave out only the disclaimer and the copyright.
+    t = counted([HEADER, *BODY, *FOOTER], 2)
+    assert [f["sheet_row"] for f in t.footer] == [7, 8]
+    assert [r["opportunity_id"] for r in t.rows][-1] == "Total"
+
+
+def test_auto_and_the_old_switch_find_the_footer():
+    assert [f["sheet_row"] for f in counted([HEADER, *BODY, *FOOTER], "auto").footer] == [5, 6, 7, 8]
+    assert SheetSpec.from_config({"stream_name": "x", "spreadsheet_url": "u" * 30, "skip_footer": True}).footer_rows == "auto"
+    assert counted([HEADER, *BODY, *FOOTER], 0).footer == []
+
+
+def test_a_count_as_big_as_the_table_leaves_nothing_out():
+    t = counted([HEADER, *BODY], 3)
+    assert len(t.rows) == 3 and t.footer == [] and "not more than 3" in t.footer_kept
