@@ -197,7 +197,7 @@ wheels = [
 
 [[package]]
 name = "aria-sheets-table"
-version = "1.5.0"
+version = "1.6.0"
 source = { editable = "packages/sheets-table" }
 
 [[package]]
@@ -2328,7 +2328,7 @@ wheels = [
 
 [[package]]
 name = "tap-googlesheetsrange"
-version = "1.5.0"
+version = "1.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aria-sheets-table" },

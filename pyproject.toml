@@ -1,6 +1,6 @@
 [project]
 name = "tap-googlesheetsrange"
-version = "1.5.0"
+version = "1.6.0"
 description = "Singer tap for GoogleSheetsRange, built with the Meltano Singer SDK."
 readme = "README.md"
 authors = [{ name = "Jesse Ocon", email = "jesse.ocon@growthnirvana.com" }]
@@ -27,7 +27,7 @@ dependencies = [
     "gspread",
     "google-auth",
     # pip (Hotglue) installs it from this repo's tag; uv uses the folder (tool.uv.sources).
-    "aria-sheets-table @ git+https://github.com/growth-nirvana/tap-googlesheetsrange.git@v1.5.0#subdirectory=packages/sheets-table",
+    "aria-sheets-table @ git+https://github.com/growth-nirvana/tap-googlesheetsrange.git@v1.6.0#subdirectory=packages/sheets-table",
 ]
 
 [tool.uv.sources]
